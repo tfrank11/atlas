@@ -1,4 +1,5 @@
 import asyncio
+from collections import deque
 from dataclasses import dataclass
 
 import msgpack
@@ -10,7 +11,6 @@ from atlas.lib.asyncio_utils import every
 class WorkerInfo:
     host: str
     port: int
-    busy: bool = False
 
 
 @dataclass
@@ -24,10 +24,10 @@ class Scheduler:
     tcp_server: asyncio.Server
 
     workers: list[WorkerInfo]
-    task_queue: list[TaskInfo]
+    task_queue: deque[TaskInfo]
 
     def __init__(self):
-        self.task_queue = []
+        self.task_queue = deque()
         self.workers = []
 
     def add_worker(self, worker_info: WorkerInfo):
@@ -36,25 +36,44 @@ class Scheduler:
     def recv(self, data: bytes):
         header_len = int.from_bytes(bytes=data[:4], byteorder="big", signed=False)
         header = msgpack.unpackb(packed=data[8 : 8 + header_len])
-        print(f"header={header}")
-
-        self.task_queue.append({"id": header["id"], "op": header["op"], "data": data})
+        print(f"[Scheduler] recevied task id={header['id']} op={header['op']}")
+        task = TaskInfo(id=header["id"], op=header["op"], data=data)
+        self.task_queue.append(task)
+        self.check_task_queue()
 
     async def handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         peer = writer.get_extra_info("peername")
-        print(f"connected: {peer}")
+        print(f"[Scheduler] client connected: {peer}")
         while True:
             data = await reader.read(1024)
             if not data:
                 break
-            await self.recv(data=data)
+            self.recv(data=data)
             writer.write(b"ack")
             await writer.drain()
-        print(f"disconnected: {peer}")
+        print(f"[Scheduler] client disconnected: {peer}")
         writer.close()
 
-    def check_task_queue(self):
-        print(f"check_task_queue -> see {len(self.task_queue)}")
+    async def check_task_queue(self):
+        if not self.task_queue:
+            return
+        print(f"[Scheduler] check_task_queue -> see {len(self.task_queue)} tasks")
+        for worker in self.workers:
+            if not self.task_queue:
+                break
+            task = self.task_queue.popleft()
+            await self.dispatch_task(task=task, worker=worker)
+
+    async def dispatch_task(self, worker: WorkerInfo, task: TaskInfo):
+        reader, writer = await asyncio.open_connection(
+            host=worker.host, port=worker.port
+        )
+        writer.write(data=task.data)
+        await writer.drain()
+        res = await reader.read(1024)
+        print(f"[Scheduler] dispatch_task() - worker responded with: {res}")
+        writer.close()
+        await writer.wait_closed()
 
     async def start(self):
         # start task queue polling interval
@@ -63,16 +82,16 @@ class Scheduler:
 
         # start tcp server
         host = "127.0.0.1"
-        port = 8786
-        print(f"Scheduler: starting tcp server on {host}:{port}")
-        self.server = await asyncio.start_server(self.handle, "127.0.0.1", 8786)
+        port = 8700
+        print(f"[Scheduler] starting tcp server on {host}:{port}")
+        self.server = await asyncio.start_server(self.handle, host, port)
         async with self.server:
             await self.server.serve_forever()
 
 
 async def main():
     scheduler = Scheduler()
-    worker1 = WorkerInfo(host="127.0.0.1", port=8787)
+    worker1 = WorkerInfo(host="127.0.0.1", port=8701)
     scheduler.add_worker(worker1)
     await scheduler.start()
 
