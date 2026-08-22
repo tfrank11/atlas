@@ -3,19 +3,18 @@ import asyncio
 import cloudpickle
 import msgpack
 
+from atlas.lib.reader_utils import read_frame
+
 
 class Worker:
     tcp_server: asyncio.Server
 
-    def recv(self, data: bytes):
-        header_len = int.from_bytes(data[:4], "big")
-        body_len = int.from_bytes(data[4:8], "big")
-        header = msgpack.unpackb(data[8 : 8 + header_len])
-        body_bytes = data[8 + header_len : 8 + header_len + body_len]
+    def recv(self, header: bytes, body: bytes):
+        header = msgpack.unpackb(header)
         print(f"[Worker] received header={header}")
 
         try:
-            task_fn = cloudpickle.loads(body_bytes)
+            task_fn = cloudpickle.loads(body)
         except Exception as e:  # noqa: BLE001
             print(f"[Worker] deserialization error={e}")
             return
@@ -33,10 +32,10 @@ class Worker:
         peer = writer.get_extra_info("peername")
         print(f"connected: {peer}")
         while True:
-            data = await reader.read(1024)
-            if not data:
+            frame = await read_frame(reader)
+            if not frame:
                 break
-            self.recv(data=data)
+            self.recv(header=frame.header, body=frame.body)
             writer.write(b"ack")
             await writer.drain()
         print(f"disconnected: {peer}")

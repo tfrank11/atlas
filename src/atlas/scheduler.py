@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import msgpack
 
 from atlas.lib.asyncio_utils import every
+from atlas.lib.reader_utils import read_frame
 
 
 @dataclass
@@ -33,11 +34,10 @@ class Scheduler:
     def add_worker(self, worker_info: WorkerInfo):
         self.workers.append(worker_info)
 
-    def recv(self, data: bytes):
-        header_len = int.from_bytes(bytes=data[:4], byteorder="big", signed=False)
-        header = msgpack.unpackb(packed=data[8 : 8 + header_len])
+    def recv(self, header: bytes, full_payload: bytes):
+        header = msgpack.unpackb(packed=header)
         print(f"[Scheduler] recevied task id={header['id']} op={header['op']}")
-        task = TaskInfo(id=header["id"], op=header["op"], data=data)
+        task = TaskInfo(id=header["id"], op=header["op"], data=full_payload)
         self.task_queue.append(task)
         self.check_task_queue()
 
@@ -45,10 +45,10 @@ class Scheduler:
         peer = writer.get_extra_info("peername")
         print(f"[Scheduler] client connected: {peer}")
         while True:
-            data = await reader.read(1024)
-            if not data:
+            frame = await read_frame(reader)
+            if not frame:
                 break
-            self.recv(data=data)
+            self.recv(header=frame.header, full_payload=frame.full_payload)
             writer.write(b"ack")
             await writer.drain()
         print(f"[Scheduler] client disconnected: {peer}")
