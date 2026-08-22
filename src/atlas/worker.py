@@ -12,6 +12,7 @@ class Worker:
         body_len = int.from_bytes(data[4:8], "big")
         header = msgpack.unpackb(data[8 : 8 + header_len])
         body_bytes = data[8 + header_len : 8 + header_len + body_len]
+        print(f"[Worker] received header={header}")
 
         try:
             task_fn = cloudpickle.loads(body_bytes)
@@ -20,10 +21,13 @@ class Worker:
             return
 
         try:
-            print(f"[Worker] running task_fn() from header={header}")
+            print("[Worker] starting task")
+            print("[Worker] ----------------------------------------")
             task_fn()
+            print("[Worker] ----------------------------------------")
         except Exception as e:  # noqa: BLE001
             print(f"[Worker] task error={e}")
+            print("[Worker] ----------------------------------------")
 
     async def handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         peer = writer.get_extra_info("peername")
