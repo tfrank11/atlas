@@ -1,18 +1,15 @@
 import asyncio
+from dataclasses import asdict
+from uuid import uuid4
 
-import cloudpickle
-import msgpack
+from atlas.lib.protocol_utils import deserialize_header, read_frame, serialize_request
+from atlas.lib.types import ClientSubmitTask
 
 
-def send(writer: asyncio.StreamWriter, op: str, id: int, task_fn: callable):
-    header_obj = {"op": op, "id": id}
-    header = msgpack.packb(header_obj, use_bin_type=True)
-    header_len = len(header).to_bytes(4, "big", signed=False)
-
-    body = cloudpickle.dumps(task_fn)
-    body_len = len(body).to_bytes(4, "big", signed=False)
-
-    payload = header_len + body_len + header + body
+def send_task(writer: asyncio.StreamWriter, task_id: int, task_fn: callable):
+    header_obj = ClientSubmitTask(task_id=task_id)
+    print("header_obj", asdict(header_obj))
+    payload = serialize_request(header_obj=header_obj, task_fn=task_fn)
     writer.write(payload)
 
 
@@ -24,12 +21,14 @@ async def main():
     def task_fn():
         print("hello from client")
 
-    send(writer, op="submit", id=1, task_fn=task_fn)
+    task_id = str(uuid4())
+    send_task(writer, task_id=task_id, task_fn=task_fn)
     await writer.drain()
-    print(await reader.read(1024))
-
-    writer.close()
-    await writer.wait_closed()
+    frame = await read_frame(reader)
+    if frame:
+        header = deserialize_header(frame.header_bytes)
+        writer.close()
+        await writer.wait_closed()
 
 
 asyncio.run(main())
