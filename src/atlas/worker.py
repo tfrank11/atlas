@@ -31,7 +31,6 @@ class Worker:
             return
 
         try:
-            print("[Worker] starting task")
             print("[Worker] ----------------------------------------")
             task_fn()
             print("[Worker] ----------------------------------------")
