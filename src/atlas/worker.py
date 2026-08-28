@@ -3,15 +3,25 @@ import asyncio
 import cloudpickle
 import msgpack
 
-from atlas.lib.reader_utils import read_frame
+from atlas.lib.protocol_utils import deserialize_header, read_frame, serialize_request
+from atlas.lib.types import (
+    ClientSubmitTask,
+    RequestType,
+    WorkerBusy,
+    WorkerFinishedTask,
+    WorkerLogin,
+)
 
 
 class Worker:
-    tcp_server: asyncio.Server
-
-    def recv(self, header: bytes, body: bytes):
-        header = msgpack.unpackb(header)
+    async def handle_submit_task(
+        self, writer: asyncio.StreamWriter, header: ClientSubmitTask, body: bytes
+    ):
         print(f"[Worker] received header={header}")
+        print(f"[Worker] starting task with id={header.task_id}")
+        busy_header = WorkerBusy(task_id=header.task_id)
+        writer.write(serialize_request(busy_header))
+        await writer.drain()
 
         try:
             task_fn = cloudpickle.loads(body)
@@ -24,35 +34,53 @@ class Worker:
             print("[Worker] ----------------------------------------")
             task_fn()
             print("[Worker] ----------------------------------------")
+
+            print(f"[Worker] completed task with id={header.task_id}")
+
+            finished_header = WorkerFinishedTask(task_id=header.task_id)
+            writer.write(serialize_request(finished_header))
+            await writer.drain()
+
         except Exception as e:  # noqa: BLE001
             print(f"[Worker] task error={e}")
             print("[Worker] ----------------------------------------")
 
     async def handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         peer = writer.get_extra_info("peername")
-        print(f"connected: {peer}")
+        print(f"[Worker] peer connected: {peer}")
         while True:
             frame = await read_frame(reader)
             if not frame:
                 break
-            self.recv(header=frame.header, body=frame.body)
-            writer.write(b"ack")
-            await writer.drain()
-        print(f"disconnected: {peer}")
+            header = deserialize_header(frame.header_bytes)
+            if header.type == RequestType.CLIENT_SUBMIT_TASK:
+                await self.handle_submit_task(
+                    writer=writer, header=header, body=frame.body_bytes
+                )
+            if header.type == RequestType.SCHEDULER_ACK_WORKER_LOGIN:
+                print("[Worker] received ack from scheduler for successful login")
+            else:
+                print(f"[Worker] received unexpected header={header}")
+        print(f"[Worker] peer disconnected: {peer}")
         writer.close()
 
-    async def start(self):
-        host = "127.0.0.1"
-        port = 8701
-        print(f"[Worker] starting tcp server on {host}:{port}")
-        self.tcp_server = await asyncio.start_server(self.handle, host, port)
-        async with self.tcp_server:
-            await self.tcp_server.serve_forever()
+    async def start(self, scheduler_host: str, scheduler_port: int):
+        reader, writer = await asyncio.open_connection(
+            host=scheduler_host, port=scheduler_port
+        )
+
+        worker_login_header = WorkerLogin()
+        payload = serialize_request(worker_login_header)
+        writer.write(payload)
+        print(f"[Worker] logging into scheduler at {scheduler_host}:{scheduler_port}")
+        await writer.drain()
+
+        await self.handle(writer=writer, reader=reader)
 
 
 async def main():
     worker = Worker()
-    await worker.start()
+    await worker.start(scheduler_host="localhost", scheduler_port=8700)
 
 
 asyncio.run(main())
