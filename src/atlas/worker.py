@@ -57,7 +57,7 @@ class Worker:
                 await self.handle_submit_task(
                     writer=writer, header=header, body=frame.body_bytes
                 )
-            if header.type == RequestType.SCHEDULER_ACK_WORKER_LOGIN:
+            elif header.type == RequestType.SCHEDULER_ACK_WORKER_LOGIN:
                 print("[Worker] received ack from scheduler for successful login")
             else:
                 print(f"[Worker] received unexpected header={header}")
