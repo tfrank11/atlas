@@ -50,9 +50,9 @@ class Scheduler:
             task = self.task_queue.popleft()
             ok = await self.dispatch_task(task=task, worker=worker)
             if not ok:
-                if task.retries > self.max_retries:
+                if task.retries >= self.max_retries:
                     print(
-                        f"[Scheduler] task (task_id={task.task_id}) retries ({task.retries}) exceeded max ({self.max_retries}). Giving up."
+                        f"[Scheduler] task (task_id={task.task_id}) retries ({task.retries}) is at max ({self.max_retries}). Giving up."
                     )
                     break
                 task.retries += 1
