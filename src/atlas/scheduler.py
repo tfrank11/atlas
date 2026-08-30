@@ -29,13 +29,13 @@ class TaskInfo:
 class Scheduler:
     tcp_server: asyncio.Server
 
-    workers: list[WorkerInfo]
+    workers: dict[(str, int), WorkerInfo]
     task_queue: deque[TaskInfo]
     max_retries: int
 
     def __init__(self, max_retries: int = 5):
         self.task_queue = deque()
-        self.workers = []
+        self.workers = {}
         self.max_retries = max_retries
 
     async def check_task_queue(self):
@@ -44,7 +44,7 @@ class Scheduler:
         print(f"[Scheduler] check_task_queue -> see {len(self.task_queue)} tasks")
         if not self.workers:
             print("[Scheduler] check_task_queue -> no workers available")
-        for worker in self.workers:
+        for worker in self.workers.values():
             if not self.task_queue:
                 break
             task = self.task_queue.popleft()
@@ -92,7 +92,8 @@ class Scheduler:
         client_address = writer.get_extra_info("peername")
         host, port = client_address
         worker = WorkerInfo(host=host, port=port, writer=writer)
-        self.workers.append(worker)
+        worker_key = (host, port)
+        self.workers[worker_key] = worker
         header = SchedulerAckWorkerLogin()
         payload = serialize_request(header)
         writer.write(payload)
@@ -103,7 +104,7 @@ class Scheduler:
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ):
         peer = writer.get_extra_info("peername")
-        print(f"[Scheduler] client connected: {peer}")
+        print(f"[Scheduler] tcp client connected: {peer}")
         while True:
             frame = await read_frame(reader)
             if not frame:
@@ -121,7 +122,12 @@ class Scheduler:
                 print("[Scheduler] worker finished task")
             else:
                 print(f"[Scheduler] received unexpected header: {header}")
-        print(f"[Scheduler] client disconnected: {peer}")
+        print(f"[Scheduler] tcp client disconnected: {peer}")
+        host, port = peer
+        peer_key = (host, port)
+        if peer_key in self.workers:
+            self.workers.pop(peer_key)
+            print(f"[Scheduler] worker unexpectedly disconnected ({peer})")
         writer.close()
 
     async def start(self):
