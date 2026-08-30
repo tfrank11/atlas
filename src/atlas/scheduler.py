@@ -119,7 +119,7 @@ class Scheduler:
             elif header.type == RequestType.WORKER_LOGIN:
                 await self.handle_worker_login(writer=writer)
             elif header.type == RequestType.WORKER_TASK_FINISHED:
-                print("[Scheduler] worker finished task")
+                print(f"[Scheduler] worker ({peer}) finished task ({header.task_id})")
             else:
                 print(f"[Scheduler] received unexpected header: {header}")
         print(f"[Scheduler] tcp client disconnected: {peer}")
