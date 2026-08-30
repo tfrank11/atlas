@@ -32,13 +32,13 @@ class Worker:
 
         try:
             print("[Worker] ----------------------------------------")
-            task_fn()
+            rtn = task_fn()
             print("[Worker] ----------------------------------------")
 
             print(f"[Worker] completed task with id={header.task_id}")
 
             finished_header = WorkerFinishedTask(task_id=header.task_id)
-            writer.write(serialize_request(finished_header))
+            writer.write(serialize_request(finished_header, body=rtn))
             await writer.drain()
 
         except Exception as e:  # noqa: BLE001

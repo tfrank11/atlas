@@ -9,6 +9,7 @@ from atlas.lib.types import (
     RequestType,
     SchedulerAckTask,
     SchedulerAckWorkerLogin,
+    WorkerFinishedTask,
 )
 
 
@@ -23,19 +24,23 @@ class WorkerInfo:
 class TaskInfo:
     task_id: int
     data: bytes
+    client_writer: asyncio.StreamWriter
     retries: int = 0
 
 
 class Scheduler:
     tcp_server: asyncio.Server
 
-    workers: dict[(str, int), WorkerInfo]
+    workers: dict[(str, int), WorkerInfo]  # key = (host, port)
     task_queue: deque[TaskInfo]
+    cur_tasks: dict[str, TaskInfo]  # key = task_id
+
     max_retries: int
 
     def __init__(self, max_retries: int = 5):
-        self.task_queue = deque()
         self.workers = {}
+        self.task_queue = deque()
+        self.cur_tasks = {}
         self.max_retries = max_retries
 
     async def check_task_queue(self):
@@ -64,6 +69,7 @@ class Scheduler:
         )
         try:
             writer = worker.writer
+            self.cur_tasks[task.task_id] = task
             writer.write(data=task.data)
             await writer.drain()
             # res = await reader.read(1024)
@@ -80,7 +86,7 @@ class Scheduler:
         full_payload: bytes,
     ):
         print(f"[Scheduler] received task_id={header.task_id}")
-        task = TaskInfo(task_id=header.task_id, data=full_payload)
+        task = TaskInfo(task_id=header.task_id, data=full_payload, client_writer=writer)
         self.task_queue.append(task)
         await self.check_task_queue()
         header = SchedulerAckTask()
@@ -99,6 +105,20 @@ class Scheduler:
         writer.write(payload)
         await writer.drain()
         print(f"[Scheduler] accepting new worker at {host}:{port}")
+
+    async def handle_worker_task_finished(
+        self,
+        writer: asyncio.StreamWriter,
+        header: WorkerFinishedTask,
+        full_payload_bytes: bytes,
+    ):
+        client_address = writer.get_extra_info("peername")
+        host, port = client_address
+        client_writer = self.cur_tasks[header.task_id].client_writer
+        client_writer.write(full_payload_bytes)
+        await client_writer.drain()
+        self.cur_tasks.pop(header.task_id)
+        print(f"[Scheduler] worker ({host}:{port}) finished task ({header.task_id})")
 
     async def handle_tcp(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
@@ -119,7 +139,11 @@ class Scheduler:
             elif header.type == RequestType.WORKER_LOGIN:
                 await self.handle_worker_login(writer=writer)
             elif header.type == RequestType.WORKER_TASK_FINISHED:
-                print(f"[Scheduler] worker ({peer}) finished task ({header.task_id})")
+                await self.handle_worker_task_finished(
+                    writer=writer,
+                    header=header,
+                    full_payload_bytes=frame.full_payload_bytes,
+                )
             else:
                 print(f"[Scheduler] received unexpected header: {header}")
         print(f"[Scheduler] tcp client disconnected: {peer}")

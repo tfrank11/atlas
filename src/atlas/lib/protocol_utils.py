@@ -39,13 +39,13 @@ def deserialize_header(header_bytes: bytes) -> RequestHeader:
     return header
 
 
-def serialize_request(header_obj: RequestHeader, task_fn=None) -> bytes:
+def serialize_request(header_obj: RequestHeader, body=None) -> bytes:
     header_dict = asdict(header_obj)
     header_dict["type"] = header_obj.type.value
     header_bytes = msgpack.packb(header_dict, use_bin_type=True)
     header_len = len(header_bytes).to_bytes(4, "big", signed=False)
 
-    body = cloudpickle.dumps(task_fn) if task_fn is not None else b""
-    body_len = len(body).to_bytes(4, "big", signed=False)
-    payload = header_len + body_len + header_bytes + body
+    body_bytes = cloudpickle.dumps(body) if body is not None else b"empty"
+    body_len = len(body_bytes).to_bytes(4, "big", signed=False)
+    payload = header_len + body_len + header_bytes + body_bytes
     return payload
