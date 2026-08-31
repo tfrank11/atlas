@@ -78,8 +78,9 @@ class Worker:
             )
             await writer.drain()
 
-            await self.handle(writer=writer, reader=reader)
             self.scheduler_reconnect_retries = 0
+
+            await self.handle(writer=writer, reader=reader)
         except Exception as e:  # noqa: BLE001
             sec_until_retry = min(
                 self.max_scheduler_reconnect_sec,
