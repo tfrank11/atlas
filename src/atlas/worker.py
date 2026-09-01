@@ -81,6 +81,7 @@ class Worker:
             self.scheduler_reconnect_retries = 0
 
             await self.handle(writer=writer, reader=reader)
+            await self.start(scheduler_host, scheduler_port)
         except Exception as e:  # noqa: BLE001
             sec_until_retry = min(
                 self.max_scheduler_reconnect_sec,
