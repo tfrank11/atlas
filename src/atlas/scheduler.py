@@ -72,8 +72,6 @@ class Scheduler:
             self.cur_tasks[task.task_id] = task
             writer.write(data=task.data)
             await writer.drain()
-            # res = await reader.read(1024)
-            # print(f"[Scheduler] dispatch_task() - worker responded with: {res}")
             return True
         except Exception as e:  # noqa: BLE001
             print(f"[Scheduler] task dispatch error, adding back to queue. {e}")
