@@ -75,3 +75,8 @@ HEADER_REGISTRY: dict[RequestType, type] = {
     RequestType.WORKER_TASK_FINISHED: WorkerFinishedTask,
     RequestType.WORKER_HEARTBEAT: WorkerHeartbeat,
 }
+
+
+class WorkerStatus(Enum):
+    AVAILABLE = 0
+    BUSY = 1

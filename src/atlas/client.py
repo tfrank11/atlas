@@ -1,4 +1,5 @@
 import asyncio
+import time
 from uuid import uuid4
 
 import cloudpickle
@@ -55,18 +56,13 @@ class Client:
 async def main():
     client = Client(scheduler_host="127.0.0.1", scheduler_port=8700)
 
-    def task1():
-        print("hello from client")
+    def task():
+        print("waiting for 5 seconds")
+        time.sleep(5)
         return 100
 
-    res1 = await client.run(task1)
-    print(f"res1={res1}")
-
-    def task2():
-        return res1 * 2
-
-    res2 = await client.run(task2)
-    print(f"res2={res2}")
+    res = await client.run(task)
+    print(f"res2={res}")
 
 
 asyncio.run(main())

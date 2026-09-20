@@ -10,6 +10,7 @@ from atlas.lib.types import (
     SchedulerAckTask,
     SchedulerAckWorkerLogin,
     WorkerFinishedTask,
+    WorkerStatus,
 )
 
 
@@ -18,6 +19,7 @@ class WorkerInfo:
     host: str
     port: int
     writer: asyncio.StreamWriter
+    status: WorkerStatus
 
 
 @dataclass
@@ -46,12 +48,19 @@ class Scheduler:
     async def check_task_queue(self):
         if not self.task_queue:
             return
-        print(f"[Scheduler] check_task_queue -> see {len(self.task_queue)} tasks")
+        print(
+            f"[Scheduler] check_task_queue -> see {len(self.task_queue)} tasks, {len(self.workers)} workers"
+        )
         if not self.workers:
-            print("[Scheduler] check_task_queue -> no workers available")
+            return
         for worker in self.workers.values():
             if not self.task_queue:
                 break
+            if worker.status == WorkerStatus.BUSY:
+                print(
+                    f"[Scheduler] check_task_queue -> found worker, but it's busy (worker={worker.host}:{worker.port})"
+                )
+                continue
             task = self.task_queue.popleft()
             ok = await self.dispatch_task(task=task, worker=worker)
             if not ok:
@@ -95,7 +104,9 @@ class Scheduler:
     async def handle_worker_login(self, writer: asyncio.StreamWriter):
         client_address = writer.get_extra_info("peername")
         host, port = client_address
-        worker = WorkerInfo(host=host, port=port, writer=writer)
+        worker = WorkerInfo(
+            host=host, port=port, writer=writer, status=WorkerStatus.AVAILABLE
+        )
         worker_key = (host, port)
         self.workers[worker_key] = worker
         header = SchedulerAckWorkerLogin()
@@ -116,12 +127,16 @@ class Scheduler:
         client_writer.write(full_payload_bytes)
         await client_writer.drain()
         self.cur_tasks.pop(header.task_id)
+        worker_key = (host, port)
+        self.workers[worker_key].status = WorkerStatus.AVAILABLE
         print(f"[Scheduler] worker ({host}:{port}) finished task ({header.task_id})")
 
     async def handle_tcp(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ):
         peer = writer.get_extra_info("peername")
+        host, port = peer
+        peer_key = (host, port)
         print(f"[Scheduler] tcp client connected: {peer}")
         while True:
             frame = await read_frame(reader)
@@ -142,11 +157,12 @@ class Scheduler:
                     header=header,
                     full_payload_bytes=frame.full_payload_bytes,
                 )
+            elif header.type == RequestType.WORKER_BUSY:
+                print(f"[Scheduler] received worker busy header: {header}")
+                self.workers[peer_key].status = WorkerStatus.BUSY
             else:
                 print(f"[Scheduler] received unexpected header: {header}")
         print(f"[Scheduler] tcp client disconnected: {peer}")
-        host, port = peer
-        peer_key = (host, port)
         if peer_key in self.workers:
             self.workers.pop(peer_key)
             print(f"[Scheduler] worker unexpectedly disconnected ({peer})")
@@ -155,7 +171,7 @@ class Scheduler:
     async def start(self):
         # start task queue polling interval
         event_loop = asyncio.get_event_loop()
-        event_loop.create_task(every(5, self.check_task_queue))
+        event_loop.create_task(every(3, self.check_task_queue))
 
         # start tcp server
         host = "127.0.0.1"
